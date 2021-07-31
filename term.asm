@@ -6,19 +6,45 @@
                 mvi     a,11h
                 mvi     b,form_feed
                 rst     4
-
-                mvi     a,10h
-                mvi     c,50
-                lxi     h,char_line
-main_loop:      
+               
+                mvi     b,1
+pattern_loop:
+                dcr     b
+                jnz     pattern_loop_1
+                mvi     b,0bfh
+                lxi     h,0
+                mvi     a,14h
                 rst     4
+
+pattern_loop_1:                
+                lxi     d,pattern+3
+                lxi     h,pattern
+                mvi     c,4
+                mvi     a,10h
+                rst     4
+
+update_loop:
+                ldax    d
+                cpi     'Z'
+                jnz     next_char
+
+                mvi     a,'A'
+                stax    d
+
+                dcx     d
                 dcr     c
-                jnz     main_loop
+                jz      halt
+                jmp     update_loop
+                
+next_char:      inr     a
+                stax    d
+                jmp     pattern_loop
 
 halt:           hlt
 
-char_line:      string  "1234567890\nABCDEFGHIJKLMNOPQRSTUVWXYZ\n#$%^&*()-_+=/?\n"
-                
+
+pattern:        string  "AAAA "
+
                 blk     100h
 stack:          equ     $
 ;------------------------------------------------------------
@@ -62,10 +88,13 @@ term_service:
                 jz      scroll
                 cpi     13h
                 jz      clear_screen
+                cpi     14h
+                jz      set_cursor_location
                 ret
 
 print_line:
                 push    psw
+                push    b
                 push    h
 print_line_loop:
                 mov     a,m
@@ -76,6 +105,7 @@ print_line_loop:
                 jnz     print_line_loop
 
                 pop     h
+                pop     b
                 pop     psw
                 ret
 
@@ -167,6 +197,16 @@ print_char_exit:
                 pop     psw
                 ret
 
+set_cursor_location:
+                push    psw
+                push    h
+                mov     a,h
+                adi     >screen
+                mov     h,a
+                shld    cursor_loc
+                pop     h
+                pop     psw
+                ret
 scroll:
                 push    psw
                 push    d
