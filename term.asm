@@ -7,6 +7,86 @@
                 mvi     b,form_feed
                 rst     4
                
+key_port:       equ     10h
+keystat_port:   equ     13h
+keyint_vector:  equ     0030h
+
+                lxi     h,keyint_vector
+                mvi     m,0c3h
+                inx     h
+                mvi     m,<keyboard_int
+                inx     h
+                mvi     m,>keyboard_int
+                mvi     a,02h
+                out     key_port
+
+                lxi     h,key_buffer
+                ei
+key_loop:                
+                lda     key_buff_in
+                mov     b,a
+                lda     key_buff_out
+                cmp     b
+                jz      key_loop
+                
+                mov     l,a
+                inr     a
+                sta     key_buff_out
+                mov     a,m
+
+                cpi     0dh
+                jnz     to_upper
+                mvi     a,'\n'
+                jmp     show_char
+
+to_upper:
+                cpi     'z'
+                jp      key_loop
+                cpi     'a'
+                jm      show_char
+                ani     5fh
+show_char:                
+                mov     b,a
+                mvi     a,11h
+                rst     4
+                ei
+                jmp     key_loop
+
+key_buffer:     equ     9000h
+key_buff_in:    byte    <key_buffer
+key_buff_out    byte    <key_buffer
+
+keyboard_int:   
+                
+                push    psw
+                push    b
+                push    h
+                in      keystat_port
+                ora     a
+                jz      key_int_end
+                in      key_port
+                ora     a
+                jnz     buffer_key
+                in      key_port+1
+                ora     a
+                jz      key_int_end
+
+buffer_key:
+                lxi     h,key_buffer
+                mov     b,a
+                lda     key_buff_in
+                mov     l,a
+                mov     m,b
+                inr     a
+                sta     key_buff_in
+
+key_int_end:
+                pop     h
+                pop     b
+                pop     psw
+                ei
+                ret
+;-------------------------------------------------------------               
                 mvi     b,1
 pattern_loop:
                 dcr     b
@@ -83,6 +163,7 @@ term_init:      push    psw             ; Load reset vector
                 ret
 
 term_service:
+               ; ei
                 cpi     10h                 ; decide which service to perform
                 jz      print_line
                 cpi     11h
@@ -202,6 +283,7 @@ mod40_ignore:
                 lxi     h,screen_last_ln    ; move back to last line
 
 print_char_exit:
+                mvi     m,'+'
                 shld    cursor_loc          ; save cursor location
                 pop     h
                 pop     b
@@ -219,6 +301,7 @@ set_cursor_location:
                 adi     >screen
                 mov     h,a
 
+                mvi     m,'+'
                 shld    cursor_loc      ; store location
 
                 pop     h
