@@ -6,86 +6,61 @@
                 mvi     a,11h
                 mvi     b,form_feed
                 rst     4
-               
-key_port:       equ     10h
-keystat_port:   equ     13h
-keyint_vector:  equ     0030h
-
-                lxi     h,keyint_vector
-                mvi     m,0c3h
-                inx     h
-                mvi     m,<keyboard_int
-                inx     h
-                mvi     m,>keyboard_int
-                mvi     a,02h
-                out     key_port
-
-                lxi     h,key_buffer
                 ei
-key_loop:                
-                lda     key_buff_in
-                mov     b,a
-                lda     key_buff_out
-                cmp     b
-                jz      key_loop
+    
+                lxi     h,prompt
+                mvi     a,10h
+                rst     4
+        
+                lxi     h,name_buff
+                mvi     c,0
+
+write_char_out:
+                mvi     a,20h
+                rst     4
                 
-                mov     l,a
-                inr     a
-                sta     key_buff_out
-                mov     a,m
+                mov     a,b
+                cpi     backspace
+                jnz     show_char
 
-                cpi     0dh
-                jnz     to_upper
-                mvi     a,'\n'
-                jmp     show_char
-
-to_upper:
-                cpi     'z'
-                jp      key_loop
-                cpi     'a'
-                jm      show_char
-                ani     5fh
-show_char:                
-                mov     b,a
+                mov     a,c
+                ora     a
+                jz      write_char_out
+                dcx     h
+                dcr     c
                 mvi     a,11h
                 rst     4
-                ei
-                jmp     key_loop
+                jmp     write_char_out
 
-key_buffer:     equ     9000h
-key_buff_in:    byte    <key_buffer
-key_buff_out    byte    <key_buffer
+show_char:
+                mvi     a,11h
+                rst     4
+                mov     a,b
+                cpi     line_feed
+                jz      greet
 
-keyboard_int:   
-                
-                push    psw
-                push    b
-                push    h
-                in      keystat_port
-                ora     a
-                jz      key_int_end
-                in      key_port
-                ora     a
-                jnz     buffer_key
-                in      key_port+1
-                ora     a
-                jz      key_int_end
-
-buffer_key:
-                lxi     h,key_buffer
-                mov     b,a
-                lda     key_buff_in
-                mov     l,a
                 mov     m,b
-                inr     a
-                sta     key_buff_in
+                inx     h
+                inr     c
+                jmp     write_char_out
 
-key_int_end:
-                pop     h
-                pop     b
-                pop     psw
-                ei
-                ret
+greet:
+                mvi     m,0
+                lxi     h,greeting
+                mvi     a,10h
+                rst     4
+                lxi     h,name_buff
+                rst     4
+                lxi     h,greeting_end    
+                rst     4
+        
+                hlt
+
+prompt:         string  "WHAT IS YOUR NAME? "
+greeting        string  "HELLO, "
+greeting_end    string  "!!\n"
+name_buff       blk     20h
+
 ;-------------------------------------------------------------               
                 mvi     b,1
 pattern_loop:
@@ -136,10 +111,20 @@ screen_cols:    equ     28h
 screen_size:    equ     screen_rows*screen_cols
 screen_end:     equ     screen+screen_size
 screen_last_ln: equ     screen_end-screen_cols
+cursor_char:    equ     1fh
+pattern_tab:    equ     4400h
+
+key_port:       equ     10h
+keystat_port:   equ     13h
+keyint_vector:  equ     0030h
+
+cursor_pat:     byte    00h,7eh,42h,42h,42h,42h,42h,7eh
 
 ; Escapes
 form_feed       equ     '\f'
 line_feed       equ     '\n'
+backspace       equ     '\b'
+
 null_terminator equ     0
 
 vector_loc      equ     20h             ; address of reset 4 vector
@@ -147,9 +132,12 @@ vector_loc      equ     20h             ; address of reset 4 vector
 cursor_loc:     word    screen          ; current address of cursor
 vector_jmp:     jmp     term_service    ; reset vector code
 
-term_init:      push    psw             ; Load reset vector
+term_init:      push    psw         
+                push    b
+                push    d
                 push    h
-                lxi     h,vector_jmp
+
+                lxi     h,vector_jmp    ; load terminal service vector
                 mov     a,m
                 sta     vector_loc
                 inx     h
@@ -158,12 +146,35 @@ term_init:      push    psw             ; Load reset vector
                 inx     h
                 mov     a,m
                 sta     vector_loc+2
+
+                lxi     d,cursor_pat     ; load cursor pattern
+                lxi     h,pattern_tab+cursor_char*8
+                mvi     c,8
+ load_pat_loop:
+                ldax    d
+                mov     m,a
+                inx     d
+                inx     h
+                dcr     c
+                jnz     load_pat_loop
+
+                lxi     h,keyint_vector   ; load keyboard interrupt vector
+                mvi     m,0c3h
+                inx     h
+                mvi     m,<keyboard_int
+                inx     h
+                mvi     m,>keyboard_int
+                mvi     a,02h
+                out     key_port
+
                 pop     h
+                pop     d
+                pop     b
                 pop     psw
                 ret
 
 term_service:
-               ; ei
+                ei
                 cpi     10h                 ; decide which service to perform
                 jz      print_line
                 cpi     11h
@@ -174,6 +185,8 @@ term_service:
                 jz      clear_screen
                 cpi     14h
                 jz      set_cursor_location
+                cpi     20h
+                jz      key_read
                 ret                         ; unknown service.  return.
 
 ;------------------------------------------------------------
@@ -207,6 +220,7 @@ print_char:
                 push    h
 
                 lhld    cursor_loc          ; get current cursor location
+                mvi     m,' '
                 mov     a,b
                 
                 cpi     form_feed           ; is it a form feed?
@@ -214,6 +228,9 @@ print_char:
 
                 cpi     line_feed           ; is it a line feed?
                 jz      print_line_feed
+
+                cpi     backspace           ; is it a backspace?
+                jz      print_backspace     
 
                 mov     m,a                 ; put char on screen
                 inx     h                   ; next location on screen
@@ -231,6 +248,14 @@ print_form_feed:
                 call    clear_screen        ; clear screen
                 lxi     h,screen            ; reset location
                 jmp     print_char_exit     ; exit
+
+print_backspace:
+                mov     a,h
+                sui     >screen
+                ora     l
+                jz      print_char_exit
+                dcx     h
+                jmp     print_char_exit
 
 print_line_feed:
                 mov     a,h                 ; get offset from top of screen
@@ -273,6 +298,7 @@ mod40_ignore:
                 aci     0
                 mov     h,a
 
+check_screen_location
                 mvi     a,>screen_end       ; past screen end?
                 cmp     h
                 jnz     print_char_exit
@@ -283,7 +309,7 @@ mod40_ignore:
                 lxi     h,screen_last_ln    ; move back to last line
 
 print_char_exit:
-                mvi     m,'+'
+                mvi     m,cursor_char
                 shld    cursor_loc          ; save cursor location
                 pop     h
                 pop     b
@@ -295,19 +321,14 @@ print_char_exit:
 ;------------------------------------------------------------
 set_cursor_location:
                 push    psw
+                push    b
                 push    h
 
                 mov     a,h             ; add screen offset to high byte
                 adi     >screen
                 mov     h,a
 
-                mvi     m,'+'
-                shld    cursor_loc      ; store location
-
-                pop     h
-                pop     psw
-                ret
-
+                jmp     check_screen_location
 ;------------------------------------------------------------
 ;  Scroll the screen one line
 ;  In: a=12
@@ -374,4 +395,75 @@ clear_screen_loop:
                 pop     d
                 pop     b
                 pop     psw
+                ret
+
+key_read:
+                push    psw
+                push    h
+
+                lxi     h,key_buffer
+key_read_loop:                
+                lda     key_buff_in
+                mov     b,a
+                lda     key_buff_out
+                cmp     b
+                jz      key_read_loop
+                
+                mov     l,a
+                inr     a
+                sta     key_buff_out
+                mov     b,m
+
+                pop     h
+                pop     psw
+                ret
+
+                
+key_buffer:     equ     9000h
+key_buff_in:    byte    <key_buffer
+key_buff_out    byte    <key_buffer
+
+keyboard_int:   
+                push    psw
+                push    b
+                push    h
+                in      keystat_port
+                ora     a
+                jz      key_int_end
+                in      key_port
+                ora     a
+                jnz     check_key
+                in      key_port+1
+                
+                cpi     backspace
+                jz      buffer_key
+
+                cpi     0dh
+                jnz     key_int_end
+                mvi     a,line_feed
+                jmp     buffer_key
+
+check_key:
+                cpi     20h
+                jm      key_int_end
+                
+                cpi     'z'
+                jp      key_int_end
+                cpi     'a'
+                jm      buffer_key
+                ani     5fh
+buffer_key:
+                lxi     h,key_buffer
+                mov     b,a
+                lda     key_buff_in
+                mov     l,a
+                mov     m,b
+                inr     a
+                sta     key_buff_in
+
+key_int_end:
+                pop     h
+                pop     b
+                pop     psw
+                ei
                 ret
