@@ -7,45 +7,26 @@
                 mvi     b,form_feed
                 rst     4
                 ei
-    
+   
+loop:
                 lxi     h,prompt
                 mvi     a,10h
                 rst     4
         
                 lxi     h,name_buff
-                mvi     c,0
-
-write_char_out:
-                mvi     a,20h
+                mvi     c,20h
+                mvi     a,21h
                 rst     4
-                
-                mov     a,b
-                cpi     backspace
-                jnz     show_char
 
-                mov     a,c
+                mov     a,m
                 ora     a
-                jz      write_char_out
-                dcx     h
-                dcr     c
-                mvi     a,11h
+                jnz     greet
+                
+                lxi     h,dumbass
+                mvi     a,10h
                 rst     4
-                jmp     write_char_out
-
-show_char:
-                mvi     a,11h
-                rst     4
-                mov     a,b
-                cpi     line_feed
-                jz      greet
-
-                mov     m,b
-                inx     h
-                inr     c
-                jmp     write_char_out
-
-greet:
-                mvi     m,0
+                jmp     loop
+greet:               
                 lxi     h,greeting
                 mvi     a,10h
                 rst     4
@@ -54,12 +35,13 @@ greet:
                 lxi     h,greeting_end    
                 rst     4
         
-                hlt
+                jmp     loop
 
+name_buff       blk     21h
 prompt:         string  "WHAT IS YOUR NAME? "
-greeting        string  "HELLO, "
-greeting_end    string  "!!\n"
-name_buff       blk     20h
+dumbass:        string  "\nPUT IN YOUR NAME, DUMBASS!\n"
+greeting        string  "\nHELLO, "
+greeting_end    string  "!!\n\n"
 
 ;-------------------------------------------------------------               
                 mvi     b,1
@@ -175,18 +157,25 @@ term_init:      push    psw
 
 term_service:
                 ei
-                cpi     10h                 ; decide which service to perform
-                jz      print_line
-                cpi     11h
-                jz      print_char
-                cpi     12h
-                jz      scroll
-                cpi     13h
-                jz      clear_screen
-                cpi     14h
-                jz      set_cursor_location
-                cpi     20h
-                jz      key_read
+                push    h
+                push    psw
+                push    d
+
+                stc
+                cmc
+                ral
+                mov     e,a
+                mvi     a,>service_table
+                aci     00h
+                mov     d,a
+                ldax    d
+                mov     l,a
+                inx     d
+                ldax    d
+                mov     h,a
+                pop     d
+                pop     psw
+                xthl
                 ret                         ; unknown service.  return.
 
 ;------------------------------------------------------------
@@ -418,8 +407,52 @@ key_read_loop:
                 pop     psw
                 ret
 
+input:
+                push    psw
+                push    b
+                push    d
+                push    h
                 
-key_buffer:     equ     9000h
+                mov     d,c
+                mvi     c,0
+input_loop:
+                call    key_read
+
+                mov     a,b
+                cpi     backspace
+                jz      input_backspace
+
+                cpi     line_feed
+                jz      input_done
+
+                mov     a,c
+                cmp     d
+                jz      input_loop
+
+                call    print_char
+                mov     m,b
+                inx     h
+                inr     c
+                jmp     input_loop
+
+input_backspace:
+                mov     a,c
+                ora     a
+                jz      input_loop
+                dcx     h
+                dcr     c
+                call    print_char
+                jmp     input_loop
+
+input_done:
+                mvi     m,0
+                pop     h
+                pop     d
+                pop     b
+                pop     psw
+                ret
+
+                
 key_buff_in:    byte    <key_buffer
 key_buff_out    byte    <key_buffer
 
@@ -467,3 +500,17 @@ key_int_end:
                 pop     psw
                 ei
                 ret
+
+key_buffer:     equ     9000h
+service_table:  equ     9100h
+                org     9120h
+                word    print_line
+                word    print_char
+                word    scroll
+                word    clear_screen
+                word    set_cursor_location
+
+                org     9140h
+                word    key_read
+                word    input
+
