@@ -140,6 +140,22 @@ term_init:      push    psw
                 dcr     c
                 jnz     load_pat_loop
 
+                lxi     h,service_table
+
+service_table_loop:                     ; initilize service vector table
+                mov     a,m             ; get low byte of vector
+                inx     h
+                ora     m               ; or next byte
+                jnz     st_loop_next:   ; skip if not 0
+                dcx     h               ;
+                mvi     m,<service_ret  ; set low byte to return
+                inx     h
+                mvi     m,>service_ret  ; set high byte to return
+st_loop_next:
+                inx     h               ; next vector
+                dcr     c               ; loop if not done
+                jnz     service_table_loop
+
                 lxi     h,keyint_vector   ; load keyboard interrupt vector
                 mvi     m,0c3h
                 inx     h
@@ -163,20 +179,20 @@ term_service:
 
                 stc
                 cmc
-                ral
-                mov     e,a
+                ral                 ; two bytes per vector
+                mov     e,a         
                 mvi     a,>service_table
                 aci     00h
                 mov     d,a
-                ldax    d
+                ldax    d           ; load low byte of vector
                 mov     l,a
-                inx     d
-                ldax    d
+                inx     d           
+                ldax    d           ; load high byte of vector
                 mov     h,a
                 pop     d
                 pop     psw
-                xthl
-                ret                         ; unknown service.  return.
+                xthl                ; exchange with top of stack
+service_ret:    ret                 ; "return" to called service.
 
 ;------------------------------------------------------------
 ;   Print line service.
@@ -240,10 +256,10 @@ print_form_feed:
 
 print_backspace:
                 mov     a,h
-                sui     >screen
-                ora     l
-                jz      print_char_exit
-                dcx     h
+                sui     >screen             ; subtract screen offset
+                ora     l                   ; 
+                jz      print_char_exit     ; exit if already at beginning
+                dcx     h                   ; move back one space
                 jmp     print_char_exit
 
 print_line_feed:
@@ -386,6 +402,11 @@ clear_screen_loop:
                 pop     psw
                 ret
 
+;------------------------------------------------------------
+; Read single key from buffer
+; In: a=20
+; Out: b=key read
+;------------------------------------------------------------
 key_read:
                 push    psw
                 push    h
@@ -513,4 +534,4 @@ service_table:  equ     9100h
                 org     9140h
                 word    key_read
                 word    input
-
+                org     9300h
