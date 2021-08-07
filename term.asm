@@ -7,80 +7,88 @@
                 mvi     b,form_feed
                 rst     4
                 ei
-   
-loop:
+
+                mvi     a,10h
                 lxi     h,prompt
-                mvi     a,10h
                 rst     4
-        
-                lxi     h,name_buff
-                mvi     c,20h
+
                 mvi     a,21h
-                rst     4
-
-                mov     a,m
-                ora     a
-                jnz     greet
-                
-                lxi     h,dumbass
-                mvi     a,10h
-                rst     4
-                jmp     loop
-greet:               
-                lxi     h,greeting
-                mvi     a,10h
-                rst     4
-                lxi     h,name_buff
-                rst     4
-                lxi     h,greeting_end    
-                rst     4
-        
-                jmp     loop
-
-name_buff       blk     21h
-prompt:         string  "WHAT IS YOUR NAME? "
-dumbass:        string  "\nPUT IN YOUR NAME, DUMBASS!\n"
-greeting        string  "\nHELLO, "
-greeting_end    string  "!!\n\n"
-
-;-------------------------------------------------------------               
-                mvi     b,1
-pattern_loop:
-                dcr     b
-                jnz     pattern_loop_1
-                mvi     a,11h
-                mvi     b,'\n'
-                rst     4
-                mvi     b,04h
-
-pattern_loop_1:                
-                lxi     d,pattern+3
-                lxi     h,pattern
                 mvi     c,4
-                mvi     a,10h
+                lxi     h,in_buff
                 rst     4
 
-update_loop:
-                ldax    d
-                cpi     'Z'
-                jnz     next_char
-
-                mvi     a,'A'
-                stax    d
-
-                dcx     d
-                dcr     c
-                jz      halt
-                jmp     update_loop
+                mvi     d,0
+                mvi     e,0
                 
-next_char:      inr     a
-                stax    d
-                jmp     pattern_loop
+str2hex_loop:
+                mov     a,m
+                inx     h
+                sui     '0'
+                jm      str2hex_done
+                cpi     0ah
+                jm      str2hex
+                sui     07h
+                cpi     10h
+                jp      str2hex_done
+str2hex:
+                mov     b,a
+                ora     a
+                mvi     c,4
+str2hex_ral:
+                mov     a,e
+                ral
+                mov     e,a
+                mov     a,d
+                ral
+                mov     d,a
+                dcr     c
+                jnz     str2hex_ral
+                
+                mov     a,e
+                ora     b
+                mov     e,a
+                jmp     str2hex_loop
+str2hex_done:
+                mvi     a,10h
+                lxi     h,eq_str
+                rst     4
 
-halt:           hlt
+                xra     a
+                sta     out_buff
 
+outloop:
+                mvi     a,31h
+                mvi     b,10
+                rst     4
 
-pattern:        string  "AAAA "
+                mov     a,b
+                adi     '0'
+
+                lxi     h,out_buff
+
+buff_loop:
+                mov     b,a
+                mov     a,m
+                mov     m,b
+                inx     h
+                ora     a
+                jnz     buff_loop
+                mvi     m,0
+
+                mov     a,d
+                ora     e
+                jnz     outloop
+
+                mvi     a,10h
+                lxi     h,out_buff
+                rst     4
+
+                hlt
+
+prompt:         string  "ENTER HEX: "
+eq_str:         string  " == "
+out_buff:       blk     6
+in_buff:        blk     6
 
                 blk     100h
 stack:          equ     $
@@ -140,22 +148,6 @@ term_init:      push    psw
                 dcr     c
                 jnz     load_pat_loop
 
-                lxi     h,service_table
-
-service_table_loop:                     ; initilize service vector table
-                mov     a,m             ; get low byte of vector
-                inx     h
-                ora     m               ; or next byte
-                jnz     st_loop_next:   ; skip if not 0
-                dcx     h               ;
-                mvi     m,<service_ret  ; set low byte to return
-                inx     h
-                mvi     m,>service_ret  ; set high byte to return
-st_loop_next:
-                inx     h               ; next vector
-                dcr     c               ; loop if not done
-                jnz     service_table_loop
-
                 lxi     h,keyint_vector   ; load keyboard interrupt vector
                 mvi     m,0c3h
                 inx     h
@@ -177,18 +169,20 @@ term_service:
                 push    psw
                 push    d
 
-                stc
-                cmc
-                ral                 ; two bytes per vector
-                mov     e,a         
-                mvi     a,>service_table
-                aci     00h
-                mov     d,a
-                ldax    d           ; load low byte of vector
-                mov     l,a
-                inx     d           
-                ldax    d           ; load high byte of vector
-                mov     h,a
+                ora     a           ; clear carry
+                ral                 ; get service offset
+                mov     e,a         ; into de
+                mvi     a,0         ;
+                ral                 ;
+                mov     d,a         ;
+
+                lxi     h,service_table
+                dad     d           ; add service offset
+                mov     e,m         ; get service vector    
+                inx     h           ; into de
+                mov     d,m 
+                xchg                ; move to hl
+
                 pop     d
                 pop     psw
                 xthl                ; exchange with top of stack
@@ -522,16 +516,388 @@ key_int_end:
                 ei
                 ret
 
-key_buffer:     equ     9000h
-service_table:  equ     9100h
-                org     9120h
-                word    print_line
-                word    print_char
-                word    scroll
-                word    clear_screen
-                word    set_cursor_location
+;------------------------------------------------------------
+; Multiply
+; In: a=30h  d=multiplican e=multiplier
+; Out: de=product
+;------------------------------------------------------------
+multiply:
+                push    psw
+                push    b
+                push    h
 
-                org     9140h
-                word    key_read
-                word    input
-                org     9300h
+                mov     h,d
+                mvi     d,0
+                mvi     l,0
+                mvi     c,8h
+                xra     a
+mult_loop:   
+                mov     a,l
+                ral
+                mov     l,a
+                mov     a,h
+                ral     
+                mov     h,a
+                jnc     mult_next
+                dad     d
+mult_next:
+                dcr     c
+                jnz     mult_loop
+                
+                mov     d,h
+                mov     e,l
+
+                pop     h
+                pop     b
+                pop     psw
+                ret
+
+;------------------------------------------------------------
+; Divide
+; In: a=31  b=divisor  de=dividend
+; Out: b=remainder  de=quotient
+;------------------------------------------------------------
+divide:
+                push    psw
+                push    h
+                push    b
+
+                mvi     c,10h
+                xra     a
+                mov     h,a
+                mov     l,a
+div_loop:
+                mov     a,e
+                ral
+                mov     e,a
+                mov     a,d
+                ral
+                mov     d,a
+                mov     a,l
+                ral     
+                mov     l,a
+                mov     a,h
+                ral
+                mov     h,a
+
+                push    b
+                mov     a,l
+                sub     b
+                mov     c,a
+                mov     a,h
+                sbi     0
+                cmc
+                jnc     div_next
+
+                mov     h,a
+                mov     l,c
+    
+div_next:
+                pop     b
+                dcr     c
+                jnz     div_loop
+
+                mov     a,e
+                ral
+                mov     e,a
+                mov     a,d
+                ral 
+                mov     d,a
+
+                pop     b
+                mov     b,l
+                pop     h
+                pop     psw
+                ret
+
+key_buffer:     blk     100h
+
+service_table:
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    print_line              ; 10h
+                word    print_char              ; 11h
+                word    scroll                  ; 12h
+                word    clear_screen            ; 13h
+                word    set_cursor_location     ; 14h
+                word    service_ret 
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    key_read                ; 20h
+                word    input                   ; 21h
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    multiply                ; 30h
+                word    divide                  ; 31h
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
+                word    service_ret
