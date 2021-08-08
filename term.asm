@@ -8,81 +8,34 @@
                 rst     4
                 ei
 
-                mvi     a,10h
+hex_loop:
+                mvi     a,10h       ; show prompt
                 lxi     h,prompt
                 rst     4
 
-                mvi     a,21h
+                mvi     a,21h       ; get number string
                 mvi     c,4
                 lxi     h,in_buff
                 rst     4
 
-                mvi     d,0
-                mvi     e,0
-                
-str2hex_loop:
-                mov     a,m
-                inx     h
-                sui     '0'
-                jm      str2hex_done
-                cpi     0ah
-                jm      str2hex
-                sui     07h
-                cpi     10h
-                jp      str2hex_done
-str2hex:
-                mov     b,a
-                ora     a
-                mvi     c,4
-str2hex_ral:
-                mov     a,e
-                ral
-                mov     e,a
-                mov     a,d
-                ral
-                mov     d,a
-                dcr     c
-                jnz     str2hex_ral
-                
-                mov     a,e
-                ora     b
-                mov     e,a
-                jmp     str2hex_loop
-str2hex_done:
-                mvi     a,10h
+                mvi     a,40h       ; convert hex string to number
+                rst     4           ;  in de
+
+                mvi     a,10h       ; output ==
                 lxi     h,eq_str
                 rst     4
 
-                xra     a
-                sta     out_buff
-
-outloop:
-                mvi     a,31h
-                mvi     b,10
+                lxi     h,out_buff  ; convert de to decimal string
+                mvi     a,42h
+                rst     4
+                
+                mvi     a,10h       ; output converted number
                 rst     4
 
-                mov     a,b
-                adi     '0'
-
-                lxi     h,out_buff
-
-buff_loop:
-                mov     b,a
-                mov     a,m
-                mov     m,b
-                inx     h
-                ora     a
-                jnz     buff_loop
-                mvi     m,0
-
-                mov     a,d
-                ora     e
-                jnz     outloop
-
-                mvi     a,10h
-                lxi     h,out_buff
-                rst     4
-
+                mvi     a,11h       ; output line feed
+                mvi     b,'\n'
+                rst     4 
+                jmp     hex_loop
                 hlt
 
 prompt:         string  "ENTER HEX: "
@@ -164,7 +117,6 @@ term_init:      push    psw
                 ret
 
 term_service:
-                ei
                 push    h
                 push    psw
                 push    d
@@ -186,6 +138,7 @@ term_service:
                 pop     d
                 pop     psw
                 xthl                ; exchange with top of stack
+                ei
 service_ret:    ret                 ; "return" to called service.
 
 ;------------------------------------------------------------
@@ -403,6 +356,7 @@ clear_screen_loop:
 ;------------------------------------------------------------
 key_read:
                 push    psw
+                push    d
                 push    h
 
                 lxi     h,key_buffer
@@ -413,12 +367,15 @@ key_read_loop:
                 cmp     b
                 jz      key_read_loop
                 
-                mov     l,a
+                mov     e,a
+                mvi     d,0
+                dad     d
                 inr     a
                 sta     key_buff_out
                 mov     b,m
 
                 pop     h
+                pop     d
                 pop     psw
                 ret
 
@@ -474,6 +431,7 @@ key_buff_out    byte    <key_buffer
 keyboard_int:   
                 push    psw
                 push    b
+                push    d
                 push    h
                 in      keystat_port
                 ora     a
@@ -504,13 +462,16 @@ buffer_key:
                 lxi     h,key_buffer
                 mov     b,a
                 lda     key_buff_in
-                mov     l,a
+                mov     e,a
+                mvi     d,0
+                dad     d
                 mov     m,b
                 inr     a
                 sta     key_buff_in
 
 key_int_end:
                 pop     h
+                pop     d
                 pop     b
                 pop     psw
                 ei
@@ -610,6 +571,105 @@ div_next:
                 pop     psw
                 ret
 
+;------------------------------------------------------------
+; String to hex
+; In: a=40h hl=hex string
+; Out: de=hex result
+;------------------------------------------------------------
+str2hex:
+                push    psw
+                push    b
+                push    h
+
+                mvi     d,0
+                mvi     e,0
+                
+str2hex_loop:
+                mov     a,m
+                inx     h
+                sui     '0'
+                jm      str2hex_done
+                cpi     0ah
+                jm      str2hex_store
+                sui     07h
+                cpi     10h
+                jp      str2hex_done
+str2hex_store:
+                mov     b,a
+                ora     a
+                mvi     c,4
+str2hex_ral:
+                mov     a,e
+                ral
+                mov     e,a
+                mov     a,d
+                ral
+                mov     d,a
+                dcr     c
+                jnz     str2hex_ral
+                
+                mov     a,e
+                ora     b
+                mov     e,a
+                jmp     str2hex_loop
+str2hex_done:
+                pop     h
+                pop     b
+                pop     psw
+                ret
+
+;------------------------------------------------------------
+; Format word to decimal string
+; In: a=42h  de=number to convert
+; Out: hl=output buffer
+;------------------------------------------------------------
+word2dec:
+                push    psw
+                push    b
+                push    d
+
+                mvi     m,0
+word2dec_loop:
+                mvi     b,10
+                call    divide
+
+                mvi     a,'0'       ; ascii adjust char
+                add     b
+                mov     b,a
+                call    push_char
+
+                mov     a,d         ; loop until dividend is 0
+                ora     e
+                jnz     word2dec_loop
+
+                pop     d
+                pop     b
+                pop     psw
+                ret
+
+;------------------------------------------------------------
+; Push character into beginning of string
+; In: a=41h  b=character to push  hl=address of string
+;------------------------------------------------------------
+push_char:      
+                push    psw
+                push    b
+                push    h
+
+push_char_loop:
+                mov     a,b         ; push char
+                mov     b,m
+                mov     m,a
+                inx     h
+                ora     a
+                jnz     push_char_loop
+
+                pop     h
+                pop     b
+                pop     psw
+                ret
+
+                ;*** END OF ROUTINES ***
 key_buffer:     blk     100h
 
 service_table:
@@ -630,6 +690,7 @@ service_table:
                 word    service_ret
                 word    service_ret
 
+                ; Terminal output routines
                 word    print_line              ; 10h
                 word    print_char              ; 11h
                 word    scroll                  ; 12h
@@ -647,6 +708,7 @@ service_table:
                 word    service_ret
                 word    service_ret
 
+                ; Terminal input routines
                 word    key_read                ; 20h
                 word    input                   ; 21h
                 word    service_ret
@@ -664,6 +726,7 @@ service_table:
                 word    service_ret
                 word    service_ret
 
+                ; Math routines
                 word    multiply                ; 30h
                 word    divide                  ; 31h
                 word    service_ret
@@ -681,9 +744,10 @@ service_table:
                 word    service_ret
                 word    service_ret
 
-                word    service_ret
-                word    service_ret
-                word    service_ret
+                ; String routines
+                word    str2hex                 ; 40h
+                word    push_char               ; 41h
+                word    word2dec                ; 42h
                 word    service_ret
                 word    service_ret
                 word    service_ret
