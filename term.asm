@@ -8,15 +8,43 @@
                 rst     4
                 ei
 
+show_menu:
+                lxi     h,menu
+show_menu_loop:
+                mvi     a,10h
+                rst     4
+                mov     a,m
+                ora     a
+                jnz     show_menu_loop
+menu_select:
+                mvi     a,20h
+                rst     4
+                mov     a,b
+                cpi     ' '
+                jm      menu_select
+                mvi     a,11h
+                rst     4
+                mov     a,b
+                cpi     '1'
+                jz      hex_loop
+                mvi     b,'\b'
+                mvi     a,11h
+                rst     4
+                jmp     menu_select
 hex_loop:
                 mvi     a,10h       ; show prompt
-                lxi     h,prompt
+                lxi     h,hex_prompt
                 rst     4
 
                 mvi     a,21h       ; get number string
                 mvi     c,4
                 lxi     h,in_buff
                 rst     4
+
+                lxi     h,in_buff
+                mov     a,m
+                ora     a
+                jz      show_menu
 
                 mvi     a,40h       ; convert hex string to number
                 rst     4           ;  in de
@@ -33,18 +61,38 @@ hex_loop:
                 rst     4
 
                 mvi     a,11h       ; output line feed
-                mvi     b,'\n'
-                rst     4 
                 jmp     hex_loop
                 hlt
 
-prompt:         string  "ENTER HEX: "
+menu:           string  "\n\nPRESS TO\n"
+                string  "  1   CONVERT HEX TO DECIMAL\n"
+                string  "  2   CONVERT DECIMAL TO HEX\n\n"
+                string  "CHOICE: "
+                byte    0
+hex_prompt:     string  "\nENTER HEX: "
 eq_str:         string  " == "
 out_buff:       blk     6
 in_buff:        blk     6
 
                 blk     100h
 stack:          equ     $
+
+str_len:
+                push    psw
+                push    h
+                mvi     c,0
+str_len_loop:
+                mov     a,m
+                ora     a
+                jz      str_len_end
+                inr     c
+                inx     h
+                jmp     str_len_loop
+
+str_len_end:    
+                pop     h
+                pop     psw
+                ret
 ;------------------------------------------------------------
 ; Start of terminal routines
 ;------------------------------------------------------------
@@ -144,11 +192,11 @@ service_ret:    ret                 ; "return" to called service.
 ;------------------------------------------------------------
 ;   Print line service.
 ;   In: a=10 hl=null terminated string
+;   Out: hl=one char past terminator
 ;------------------------------------------------------------
 print_line:
                 push    psw
                 push    b
-                push    h
 print_line_loop:
                 mov     a,m                 ; get current char
                 inx     h                   ; advance pointer
@@ -157,7 +205,6 @@ print_line_loop:
                 cnz     print_char          ; print char if not
                 jnz     print_line_loop     ; loop if not
 
-                pop     h
                 pop     b
                 pop     psw
                 ret
