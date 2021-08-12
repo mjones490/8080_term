@@ -27,6 +27,8 @@ menu_select:
                 mov     a,b
                 cpi     '1'
                 jz      hex_loop
+                cpi     '2'
+                jz      dec_loop
                 mvi     b,'\b'
                 mvi     a,11h
                 rst     4
@@ -60,9 +62,104 @@ hex_loop:
                 mvi     a,10h       ; output converted number
                 rst     4
 
-                mvi     a,11h       ; output line feed
                 jmp     hex_loop
-                hlt
+
+dec_loop:
+                mvi     a,10h
+                lxi     h,dec_prompt
+                rst     4
+
+                mvi     a,21h
+                lxi     h,in_buff
+                mvi     c,5
+                rst     4
+
+                mov     a,m
+                ora     a
+                jz      show_menu
+
+                lxi     h,0
+                push    h
+                lxi     h,in_buff
+
+dec2hex_loop:
+                mov     a,m
+                inx     h
+
+                cpi     '0'
+                jm      dec2hex_loop_done
+                cpi     3ah
+                jp      dec2hex_loop_done
+                sui     '0'
+                mov     b,a
+
+                xthl
+                mvi     a,19h
+                cmp     h
+                jm      dec2hex_overflow
+
+                mvi     d,0ah
+                mov     e,h
+                mvi     a,30h
+                rst     4
+                mov     h,e
+                mov     e,l
+                mvi     l,0
+                mvi     d,0ah
+                mvi     a,30h
+                rst     4
+                dad     d
+                mov     a,b
+                add     l
+                mov     l,a
+                mov     a,h
+                aci     0
+                jc      dec2hex_overflow
+                mov     h,a
+                xthl
+                jmp     dec2hex_loop
+                
+
+dec2hex_loop_done:
+                mvi     a,10h
+                lxi     h,eq_str
+                rst     4
+                
+                pop     h
+                call    hex_out
+                
+                jmp     dec_loop
+
+hex_out:
+                mov     a,h
+                call    byte_out
+                mov     a,l
+byte_out:
+                push    psw
+                rrc
+                rrc
+                rrc
+                rrc
+                call    nybble_out
+                pop     psw
+nybble_out:
+                ani     0fh
+                adi     '0'
+                cpi     3ah
+                jm      print_nybble
+                adi     07h
+print_nybble:
+                mov     b,a
+                mvi     a,11h
+                rst     4
+                ret
+
+dec2hex_overflow:
+                pop     h
+                lxi     h,overflow_str
+                mvi     a,10h
+                rst     4
+                jmp     dec_loop
 
 menu:           string  "\n\nPRESS TO\n"
                 string  "  1   CONVERT HEX TO DECIMAL\n"
@@ -70,7 +167,9 @@ menu:           string  "\n\nPRESS TO\n"
                 string  "CHOICE: "
                 byte    0
 hex_prompt:     string  "\nENTER HEX: "
+dec_prompt:     string  "\nENTER DECIMAL: "
 eq_str:         string  " == "
+overflow_str:   string  " OVERFLOW"
 out_buff:       blk     6
 in_buff:        blk     6
 
